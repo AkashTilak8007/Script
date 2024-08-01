@@ -1,0 +1,199 @@
+#!/bin/bash
+# Zip reports
+# Email Configuration
+DATE=`date +%Y-%m-%d`
+datef=`date +%d%m%y -d '1 day ago'`
+DATE1=`date --date="1 days ago" +%a`
+
+DB_USER="postgres"
+DB_NAME="postgres"
+DB_PORT="6434"
+
+CURRENT_DATE=$(date +%Y%m%d)
+TABLE_NAME="User_access_$CURRENT_DATE"
+
+QUERY="SELECT
+    u.usename AS "User",
+    STRING_AGG(r.rolname, ', ') AS "Roles"
+FROM
+    pg_user u
+JOIN
+    pg_auth_members m ON (u.usesysid = m.member)
+JOIN
+    pg_roles r ON (m.roleid = r.oid)
+GROUP BY
+    u.usename;"
+
+QUERY1="CREATE TABLE IF NOT EXISTS $TABLE_NAME(
+    Users text PRIMARY KEY,
+    Roles text);"
+
+
+QUERY2="INSERT INTO $TABLE_NAME (Users , Roles )
+SELECT
+    u.usename AS "User",
+    STRING_AGG(r.rolname, ', ') AS "Roles"
+FROM
+    pg_user u
+JOIN
+    pg_auth_members m ON (u.usesysid = m.member)
+JOIN
+    pg_roles r ON (m.roleid = r.oid)
+GROUP BY
+    u.usename;"
+
+QUERY3="insert into new_users (Users , Roles,NOW()::date - INTERVAL '1 day') select * from user_access_$CURRENT_DATE where users not in ( select users from user_access_$YES_DATE);"
+
+QUERY4="insert into deleted_users (Users , Roles, NOW()::date - INTERVAL '1 day') select * from user_access_$YES_DATE old
+where not exists ( select 'X' from user_access_$CURRENT_DATE new
+where old.users=new.users);"
+
+QUERY5="CREATE TABLE IF NOT EXISTS new_users(
+    Users text PRIMARY KEY,
+    Roles text,
+    Time  text
+);"
+
+QUERY6="CREATE TABLE IF NOT EXISTS deleted_users(
+    Users text,
+    Roles text,
+    Time  text
+);"
+
+#QUERY="SELECT usename FROM pg_user;"
+
+CURRENT_FILE="/home/postgres/postgres_users/current_users_list.csv"
+PREVIOUS_FILE="/home/postgres/postgres_users/previous_users_list.csv"
+DIFF_FILE="/home/postgres/postgres_users/diff_users_list.csv"
+FORMATTED_FILE="/tmp/abc.csv"
+
+ERROR_LOG="/tmp/psql_error.log"
+
+#> "/home/postgres/postgres_users/current_users_list.csv"
+
+servers=(
+"x.x.x.x"
+"x.x.x.x"
+
+)
+for server in "${servers[@]}"; do
+
+echo "User list from server:$server" >> "$CURRENT_FILE"
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY" >> "$CURRENT_FILE" 2> "$ERROR_LOG"
+
+if [ $? -ne 0 ]; then
+    # Send an email with the error log attached
+    (
+echo "Query failed to execute" | mailx -s "User Access review" postgresdbasupport@bajajfinserv.in
+    )
+fi
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY1"  2> "$ERROR_LOG"
+
+if [ $? -ne 0 ]; then
+    # Send an email with the error log attached
+    (
+echo "Query1 failed to execute" | mailx -s "User Access review" postgresdbasupport@bajajfinserv.in
+    )
+fi
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY2"  2> "$ERROR_LOG"
+
+if [ $? -ne 0 ]; then
+    # Send an email with the error log attached
+    (
+    echo "Query2 failed to execute" | mailx -s "User Access review:12.6(user_review.sh)" postgresdbasupport@bajajfinserv.in
+    )
+fi
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY3"  2> "$ERROR_LOG"
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY4"  2> "$ERROR_LOG"
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY5"  2> "$ERROR_LOG"
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY6"  2> "$ERROR_LOG"
+
+done
+
+
+
+compare_users() {
+    #comm -13 "$PREVIOUS_FILE" "$CURRENT_FILE" > "$DIFF_FILE"
+    diff --new-line-format="" --unchanged-line-format="" "$PREVIOUS_FILE" "$CURRENT_FILE" > "$DIFF_FILE"
+}
+
+if [ -f "$PREVIOUS_FILE" ]; then
+    # Previous file exists, so fetch current users and compare
+
+    for server in "${servers[@]}"; do
+
+echo "User list from server:$server" >> "$CURRENT_FILE"
+
+psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY" >> "$CURRENT_FILE"
+
+
+done
+
+    compare_users
+else
+    # Previous file doesn't exist, create it and fetch current users
+    touch "$PREVIOUS_FILE"
+
+    for server in "${servers[@]}"; do
+
+    echo "User list from server:$server" >> "$CURRENT_FILE"
+
+    psql -h $server -U "$DB_USER" -d "$DB_NAME" -p "$DB_PORT" -t -c "$QUERY" >> "$CURRENT_FILE"
+
+done
+
+fi
+
+cp "$CURRENT_FILE" "$FORMATTEDFILE"
+
+
+# Function to print the table with borders for two columns
+#print_table_from_file() {
+    local file="$1"
+    local col1_width=20
+    local col2_width=20
+
+    # Check if the file exists
+    if [ ! -f "$file" ]; then
+        echo "File $file does not exist."
+        exit 1
+    fi
+
+    # Read the file content
+    local content
+    content=$(<"$file")
+
+    # Print the table header
+    printf "+%s+%s+\n" "$(printf '%*s' "$col1_width" | tr ' ' '-')"
+    printf "| %-*s | %-*s |\n" "$col1_width" "Column 1" "$col2_width" "Column 2"
+    printf "+%s+%s+\n" "$(printf '%*s' "$col1_width" | tr ' ' '-')"
+
+    # Print the table rows
+    while IFS="|" read -r col1 col2; do
+        printf "| %-*s | %-*s |\n" "$col1_width" "$col1" "$col2_width" "$col2"
+    done <<< "$content"
+
+    # Print the table footer
+    printf "+%s+%s+\n" "$(printf '%*s' "$col1_width" | tr ' ' '-')"
+#}
+
+# Path to the file containing the data
+#FILE="$CURRENT_FILE"
+
+#print_table_from_file  "$CURRENT_FILE" | mailx -s "User Access review" akash.tilak@bajajfinserv.in
+
+
+#column -t "$CURRENT_FILE" > "$FORMATTED_FILE"
+
+#TABLE_BODY=$(<"$FORMATTED_FILE")
+
+#imailx -s "User Access review" akash.tilak@bajajfinserv.in
+
+
+mv "$CURRENT_FILE" "$PREVIOUS_FILE"
