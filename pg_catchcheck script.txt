@@ -1,0 +1,15 @@
+[postgres@PODPG-BKP-01 ~]$ cat /home/postgres/pg_catcheck.sh
+#!/bin/bash
+
+# List of hosts
+hosts=("x.x.x.x" "x.x.x.x")
+port=6434
+
+output=""
+
+for host in "${hosts[@]}"; do
+    output+="Checking host: $host\n"
+    result=$(/usr/pgsql-16/bin/pg_catcheck -h $host -p $port 2>&1)
+    output+="$result\n\n"
+done
+echo -e "$output" | mailx -v -r "" -s "pg_catcheck Output for POD servers" -S smtp="smtpbp 
