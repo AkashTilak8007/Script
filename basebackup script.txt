@@ -1,0 +1,14 @@
+[postgres@Sigma-Prd-db01 db_backups]$ cat /home/postgres/backup.sh
+#Backup Details
+backup_dir=/data/db_backups
+echo -e "\n\nBackup Status: $(date +"%d-%m-%y")" >> $backup_dir/Status.log
+echo -e "-----------------------" >> $backup_dir/Status.log
+echo -e "\nStart Time: $(date)\n" >> $backup_dir/Status.log
+pg_basebackup -U postgres -p 6434 -w -D $backup_dir/PostgreSQL_Base_Backup_$(date +"%d-%m-%y") -l "`date`" -Ft -z -Xs -P &>> $backup_dir/Status.log
+echo -e "\nEnd Time: $(date)" >> $backup_dir/Status.log
+
+#Auto Deletion for Backups
+#Value 7 for retention_duration will keep 8 days backups
+
+retention_duration=7
+find $backup_dir/PostgreSQL_Base_Backup* -type d -mtime +$retention_duration -exec rm -rv {} \;
